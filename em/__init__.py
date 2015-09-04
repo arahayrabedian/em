@@ -19,6 +19,7 @@ import os
 import sys
 import gettext
 import argparse
+import random
 
 
 __version__ = '0.4.0'
@@ -27,12 +28,8 @@ __version__ = '0.4.0'
 #: True if Python 2.x interpreter was detected
 PY2 = sys.version_info[0] == 2
 
-
-def get_ansi_color(color):
-    """
-    Returns an ANSI-escape code for a given color.
-    """
-    colors = {
+COLOR_KEYS = {'grey', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'}
+COLORS = {
         # attributes
         'reset':        '\033[0m',
         'bold':         '\033[1m',
@@ -58,7 +55,27 @@ def get_ansi_color(color):
         'oncyan':       '\033[46m',
         'onwhite':      '\033[47m',
     }
-    return colors.get(color.lower())
+
+
+def get_ansi_color(color):
+    """
+    Returns an ANSI-escape code for a given color.
+    """
+    return COLORS.get(color.lower())
+
+
+def get_random_color():
+    """
+    Returns a random foreground colour *name* to use.
+    """
+    return random.sample(COLOR_KEYS, 1)[0]
+
+
+def get_random_background_color():
+    """
+    Returns a random background colour *name* to use.
+    """
+    return "on%s" % get_random_color()
 
 
 def error(statuscode, cause, message):
@@ -89,11 +106,13 @@ def emphasize_line(line, pattern, color):
     Highlight a given `line` with a given `color` if the `pattern` has
     been found in the line.
     """
+    emphasized = False
     if pattern.search(line):
         color = get_ansi_color(color)
         reset = get_ansi_color('reset')
-        return '{0}{1}{2}'.format(color, line, reset)
-    return line
+        emphasized = True
+        return '{0}{1}{2}'.format(color, line, reset), emphasized
+    return line, emphasized
 
 
 def emphasize_pattern(line, pattern, color):
@@ -103,7 +122,10 @@ def emphasize_pattern(line, pattern, color):
     """
     color = get_ansi_color(color)
     reset = get_ansi_color('reset')
-    return pattern.sub(r'{0}\1{1}'.format(color, reset), line)
+
+    emphasized = pattern.search(line) is not None
+
+    return pattern.sub(r'{0}\1{1}'.format(color, reset), line), emphasized
 
 
 def emphasize(stream, patterns):
@@ -127,11 +149,27 @@ def emphasize(stream, patterns):
         for pattern, settings in patterns.items():
             color = settings['format']
             if settings['line_mode']:
-                line = emphasize_line(line, pattern, color)
+                line, emphasized = emphasize_line(line, pattern, color)
+                if emphasized:
+                    # we highlight with the first match's colour.
+                    break
             else:
-                line = emphasize_pattern(line, pattern, color)
+                line, emphasized = emphasize_pattern(line, pattern, color)
         print(line.encode(sys.getfilesystemencoding()) if PY2 else line)
 
+
+def read_patterns(pattern_file_path, arguments):
+    with open(pattern_file_path, 'r') as pattern_file:
+        patterns = dict()
+        for line in pattern_file:
+            pattern_args = {
+                'ignore_case': arguments.ignore_case,
+                'line_mode': arguments.line_mode,
+                'format': get_random_color(),
+            }
+            pattern_string = line.rstrip('\n')
+            patterns[pattern_string] = pattern_args
+    return patterns
 
 def get_arguments():
     """
@@ -146,9 +184,11 @@ def get_arguments():
         description=_(
             'Em is a terminal tool that prints FILE(s), or standard '
             'input to standard output and highlights the expressions that '
-            'are matched the PATTERN.'),
+            'are matched the PATTERN or pattern file.'),
         epilog=_(
             'With no FILE, or when FILE is -, read standard input.'
+            '  '
+            'With the -p / --pattern-file switch, PATTERN is a filename.'
             '  '
             'The FORMAT option may be one of: BOLD, UNDERLINE, [ON]GREY, '
             '[ON]RED, [ON]GREEN, [ON]YELLOW, [ON]BLUE, [ON]MAGENTA, [ON]CYAN '
@@ -159,12 +199,15 @@ def get_arguments():
         add_help=False
     )
 
-    arg = parser.add_argument('pattern', metavar='PATTERN')
+    arg = parser.add_argument('pattern', metavar='PATTERN', default=None)
     arg.help = _('a pattern to highlight')
     arg.type = _str_to_unicode
 
     arg = parser.add_argument('-f', '--format', metavar='FORMAT', default='RED')
     arg.help = _('a color to highlight matched expressions')
+
+    arg = parser.add_argument('-p', '--pattern-file', action='store_true')
+    arg.help = _('use pattern file instead of pattern')
 
     arg = parser.add_argument('files', metavar='FILE', nargs='*', default=['-'])
     arg.help = _('search for pattern in these file(s)')
@@ -183,7 +226,7 @@ def get_arguments():
     arg = parser.add_argument('-h', '--help', action='help')
     arg.help = _('show this help message and exit')
 
-    # TODO: add option to load pattern/format settings from the file
+    # TODO: add option to load format settings from the file
 
     return parser.parse_args()
 
@@ -206,13 +249,16 @@ def main():
     # terminate the program if error was occured.
     arguments = get_arguments()
     validate_arguments(arguments)
-    patterns = {
-        arguments.pattern: {
-            'format': arguments.format,
-            'ignore_case': arguments.ignore_case,
-            'line_mode': arguments.line_mode,
+    if not arguments.pattern_file:
+        patterns = {
+            arguments.pattern: {
+                'format': arguments.format,
+                'ignore_case': arguments.ignore_case,
+                'line_mode': arguments.line_mode,
+            }
         }
-    }
+    else:
+        patterns = read_patterns(arguments.pattern, arguments)
 
     # iterate over the files and highlight the given patterns
     for filename in arguments.files:
