@@ -29,7 +29,13 @@ __version__ = '0.4.0'
 PY2 = sys.version_info[0] == 2
 
 COLOR_KEYS = {'grey', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'}
-COLORS = {
+
+
+def get_ansi_color(color):
+    """
+    Returns an ANSI-escape code for a given color.
+    """
+    colors = {
         # attributes
         'reset':        '\033[0m',
         'bold':         '\033[1m',
@@ -55,13 +61,7 @@ COLORS = {
         'oncyan':       '\033[46m',
         'onwhite':      '\033[47m',
     }
-
-
-def get_ansi_color(color):
-    """
-    Returns an ANSI-escape code for a given color.
-    """
-    return COLORS.get(color.lower())
+    return colors.get(color.lower())
 
 
 def get_random_color():
